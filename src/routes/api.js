@@ -593,6 +593,8 @@ module.exports = function(router) {
 
       // Enrich items with metadata based on user's metadata source preference
       let enrichedResult = itemsResult;
+      let metadataSettings = null; // Initialize metadataSettings
+      
       if (itemsResult.allItems && itemsResult.allItems.length > 0) {
         // Check if this is an external addon and get its metadata settings
         const { getAddonMetadataSettings } = require('../utils/common');
@@ -615,7 +617,7 @@ module.exports = function(router) {
           }
         }
         
-        const metadataSettings = getAddonMetadataSettings(req.userConfig, addonId);
+        metadataSettings = getAddonMetadataSettings(req.userConfig, addonId);
         
         // Only enrich if metadata override is enabled for this addon
         if (metadataSettings.enabled) {
@@ -693,7 +695,11 @@ module.exports = function(router) {
         const tmdbLanguage = req.userConfig.tmdbLanguage || 'en-US';
         const tmdbBearerToken = req.userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN;
         
-        if (metadataSource === 'tmdb' && tmdbBearerToken) {
+        // Debug logging
+        console.log(`[Meta] TMDB ID: ${tmdbId}, Bearer Token: ${tmdbBearerToken ? 'Available' : 'Not Available'}`);
+        
+        // Try to fetch TMDB metadata if we have a bearer token
+        if (tmdbBearerToken) {
           try {
             const { fetchTmdbMetadata } = require('../integrations/tmdb');
             const tmdbMeta = await fetchTmdbMetadata(tmdbId, type, tmdbLanguage, tmdbBearerToken);

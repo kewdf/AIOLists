@@ -1272,11 +1272,13 @@ async function createAddon(userConfig) {
       // Use user's preferred language for episode names and metadata
       const metaLanguage = tmdbLanguage;
       
-      // Handle TMDB IDs differently based on source preference or language settings
-      // Use TMDB if: 1) Direct TMDB ID, 2) User prefers TMDB source, 3) User has non-English TMDB language set
-      const shouldUseTmdb = id.startsWith('tmdb:') || 
-                           (metadataSource === 'tmdb' && tmdbBearerToken) ||
-                           (tmdbBearerToken && tmdbLanguage && tmdbLanguage !== 'en-US');
+      // Handle TMDB IDs - if we have a TMDB bearer token and the ID is a TMDB ID, try to fetch TMDB metadata
+      const shouldUseTmdb = id.startsWith('tmdb:') && tmdbBearerToken;
+      
+      // Debug logging
+      if (id.startsWith('tmdb:')) {
+        console.log(`[MetaHandler] TMDB ID: ${id.replace('tmdb:', '')}, Bearer Token: ${tmdbBearerToken ? 'Available' : 'Not Available'}, Should Use TMDB: ${shouldUseTmdb}`);
+      }
       
       if (shouldUseTmdb) {
         let tmdbId, tmdbType, originalImdbId;
