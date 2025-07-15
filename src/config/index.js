@@ -54,7 +54,9 @@ const defaultConfig = {
   randomMDBListUsernames: ['showtime416', 'garycrawfordgc', 'linaspurinis', 'hdlists'],
   searchSources: ['cinemeta'], // Traditional movie/series search sources
   mergedSearchSources: ['tmdb'], // New merged search sources - enabled by default with TMDB
-  animeSearchEnabled: true, // Enable anime search - enabled by default 
+  animeSearchEnabled: true,
+  // Per-addon metadata override settings
+  addonMetadataOverrides: {}, // Format: { addonId: { enabled: boolean, metadataSource: string } }
   availableSortOptions: [
     { value: 'default', label: 'Default' },
     { value: 'rank', label: 'Rank' },

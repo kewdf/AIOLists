@@ -280,6 +280,53 @@ module.exports = function(router) {
     }
   });
 
+  router.post('/:configHash/config/addon-metadata', async (req, res) => {
+    try {
+      const { addonId, enabled, metadataSource } = req.body;
+      
+      if (!addonId) {
+        return res.status(400).json({ success: false, error: 'Addon ID is required.' });
+      }
+      
+      if (metadataSource && !['cinemeta', 'tmdb'].includes(metadataSource)) {
+        return res.status(400).json({ success: false, error: 'Invalid metadata source. Must be "cinemeta" or "tmdb".' });
+      }
+      
+      if (metadataSource === 'tmdb' && !req.userConfig.tmdbSessionId && !req.userConfig.tmdbBearerToken && !process.env.TMDB_BEARER_TOKEN) {
+        return res.status(400).json({ 
+          error: 'TMDB metadata source requires either OAuth connection or a TMDB Bearer Token. Please connect your TMDB account or provide a Bearer Token.' 
+        });
+      }
+
+      // Initialize addonMetadataOverrides if it doesn't exist
+      if (!req.userConfig.addonMetadataOverrides) {
+        req.userConfig.addonMetadataOverrides = {};
+      }
+
+      // Update the addon's metadata settings
+      if (!req.userConfig.addonMetadataOverrides[addonId]) {
+        req.userConfig.addonMetadataOverrides[addonId] = {};
+      }
+
+      if (typeof enabled === 'boolean') {
+        req.userConfig.addonMetadataOverrides[addonId].enabled = enabled;
+      }
+      
+      if (metadataSource) {
+        req.userConfig.addonMetadataOverrides[addonId].metadataSource = metadataSource;
+      }
+
+      req.userConfig.lastUpdated = new Date().toISOString();
+
+      const newConfigHash = await compressConfig(req.userConfig);
+      manifestCache.clear();
+      res.json({ success: true, configHash: newConfigHash });
+    } catch (error) {
+      console.error('Error updating addon metadata settings:', error);
+      res.status(500).json({ success: false, error: 'Failed to update addon metadata settings' });
+    }
+  });
+
   router.post('/:configHash/config', async (req, res) => {
     try {
       const { searchSources, mergedSearchSources, animeSearchEnabled } = req.body;
@@ -547,30 +594,56 @@ module.exports = function(router) {
       // Enrich items with metadata based on user's metadata source preference
       let enrichedResult = itemsResult;
       if (itemsResult.allItems && itemsResult.allItems.length > 0) {
-        const metadataSource = req.userConfig.metadataSource || 'cinemeta';
-        const hasTmdbOAuth = !!(req.userConfig.tmdbSessionId && req.userConfig.tmdbAccountId);
-        const tmdbLanguage = req.userConfig.tmdbLanguage || 'en-US';
-        const tmdbBearerToken = req.userConfig.tmdbBearerToken;
+        // Check if this is an external addon and get its metadata settings
+        const { getAddonMetadataSettings } = require('../utils/common');
+        let addonId = null;
         
-        const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
-        const enrichedItems = await enrichItemsWithMetadata(
-          itemsResult.allItems, 
-          metadataSource, 
-          hasTmdbOAuth, 
-          tmdbLanguage, 
-          tmdbBearerToken
-        );
+        // Find the addon ID for this catalog
+        if (req.userConfig.importedAddons) {
+          for (const [id, addon] of Object.entries(req.userConfig.importedAddons)) {
+            if (addon.catalogs && addon.catalogs.some(catalog => String(catalog.id) === String(catalogId))) {
+              addonId = id;
+              break;
+            }
+            // Also check for URL imports
+            if (addon.isMDBListUrlImport || addon.isTraktPublicList) {
+              if (String(addon.id) === String(catalogId)) {
+                addonId = id;
+                break;
+              }
+            }
+          }
+        }
         
-        // Update the items result with enriched items
-        enrichedResult = {
-          ...itemsResult,
-          allItems: enrichedItems
-        };
+        const metadataSettings = getAddonMetadataSettings(req.userConfig, addonId);
+        
+        // Only enrich if metadata override is enabled for this addon
+        if (metadataSettings.enabled) {
+          const metadataSource = metadataSettings.metadataSource;
+          const hasTmdbOAuth = !!(req.userConfig.tmdbSessionId && req.userConfig.tmdbAccountId);
+          const tmdbLanguage = req.userConfig.tmdbLanguage || 'en-US';
+          const tmdbBearerToken = req.userConfig.tmdbBearerToken;
+          
+          const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
+          const enrichedItems = await enrichItemsWithMetadata(
+            itemsResult.allItems, 
+            metadataSource, 
+            hasTmdbOAuth, 
+            tmdbLanguage, 
+            tmdbBearerToken
+          );
+          
+          // Update the items result with enriched items
+          enrichedResult = {
+            ...itemsResult,
+            allItems: enrichedItems
+          };
+        }
       }
   
       // Create metadata config for converter
       const metadataConfig = {
-        metadataSource: req.userConfig.metadataSource || 'cinemeta',
+        metadataSource: metadataSettings ? metadataSettings.metadataSource : (req.userConfig.metadataSource || 'cinemeta'),
         tmdbLanguage: req.userConfig.tmdbLanguage || 'en-US'
       };
 

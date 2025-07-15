@@ -638,18 +638,126 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 .addon-group-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-left: auto;
+  gap: 8px;
+  flex-shrink: 0;
 }
-  .configure-addon-group svg {
-  width: 18px;
-  height: 18px;
+
+.addon-group-actions .configure-addon-group {
+  background-color: #8E5AF7;
+  color: white;
+  border: none;
+  padding: 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
 }
+
+.addon-group-actions .configure-addon-group:hover {
+  background-color: #7B4DE0;
+}
+
+.addon-group-actions .configure-addon-group svg {
+  width: 16px;
+  height: 16px;
+}
+
 .remove-addon-group {
-    margin-left: auto;
-    color: #e53935;
+  background-color: #f44336;
+  color: white;
+  border: none;
+  padding: 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  font-size: 14px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
+
 .remove-addon-group:hover { background-color: rgba(229, 57, 53, 0.08); }
+
+.addon-metadata-settings {
+  margin-top: 10px;
+  padding: 10px;
+  background-color: #f8f9fa;
+  border-radius: 4px;
+  border: 1px solid #e9ecef;
+}
+
+.metadata-override-toggle {
+  margin-bottom: 8px;
+}
+
+.metadata-override-toggle .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+  cursor: pointer;
+}
+
+.metadata-override-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.metadata-source-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.metadata-source-select label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+  margin: 0;
+}
+
+.addon-metadata-source {
+  padding: 6px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  background-color: white;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.addon-metadata-source:focus {
+  outline: none;
+  border-color: #8E5AF7;
+  box-shadow: 0 0 0 2px rgba(142, 90, 247, 0.25);
+}
+
+@media (max-width: 600px) {
+  .addon-metadata-settings {
+    margin-top: 8px;
+    padding: 8px;
+  }
+  
+  .metadata-override-toggle .checkbox-label {
+    font-size: 13px;
+  }
+  
+  .addon-metadata-source {
+    font-size: 13px;
+    padding: 5px 6px;
+  }
+}
 
 
 .icon-legend {

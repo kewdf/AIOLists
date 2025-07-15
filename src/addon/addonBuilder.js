@@ -32,7 +32,9 @@ function getManifestCacheKey(userConfig) {
     // Include search settings in cache key - CRITICAL for search catalog generation
     searchSources: userConfig.searchSources || [],
     mergedSearchSources: userConfig.mergedSearchSources || [],
-    animeSearchEnabled: userConfig.animeSearchEnabled || false
+    animeSearchEnabled: userConfig.animeSearchEnabled || false,
+    // Include addon metadata overrides in cache key
+    addonMetadataOverrides: userConfig.addonMetadataOverrides || {}
   };
   return JSON.stringify(cacheableConfig);
 }
@@ -1122,48 +1124,81 @@ async function createAddon(userConfig) {
     // Enrich items with metadata based on user's metadata source preference
     const enrichStartTime = Date.now();
     
-    const metadataSource = userConfig.metadataSource || 'cinemeta';
-    const hasTmdbOAuth = !!(userConfig.tmdbSessionId && userConfig.tmdbAccountId);
-    const tmdbLanguage = userConfig.tmdbLanguage || 'en-US';
+    // Check if this is an external addon and get its metadata settings
+    const { getAddonMetadataSettings } = require('../utils/common');
+    let addonId = null;
     
-          const envToken = require('../config').TMDB_BEARER_TOKEN;
+    // Find the addon ID for this catalog
+    if (userConfig.importedAddons) {
+      for (const [addonKey, addon] of Object.entries(userConfig.importedAddons)) {
+        if (addon.catalogs && addon.catalogs.some(catalog => String(catalog.id) === String(id))) {
+          addonId = addonKey;
+          break;
+        }
+        // Also check for URL imports
+        if (addon.isMDBListUrlImport || addon.isTraktPublicList) {
+          if (String(addon.id) === String(id)) {
+            addonId = addonKey;
+            break;
+          }
+        }
+      }
+    }
+    
+    const metadataSettings = getAddonMetadataSettings(userConfig, addonId);
+    
+    // Only enrich if metadata override is enabled for this addon
+    let metas;
+    if (metadataSettings.enabled) {
+      const metadataSource = metadataSettings.metadataSource;
+      const hasTmdbOAuth = !!(userConfig.tmdbSessionId && userConfig.tmdbAccountId);
+      const tmdbLanguage = userConfig.tmdbLanguage || 'en-US';
+      
+      const envToken = require('../config').TMDB_BEARER_TOKEN;
       const tmdbBearerToken = userConfig.tmdbBearerToken || envToken;
-    
-    const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
-    const enrichedItems = await enrichItemsWithMetadata(
-      itemsResult.allItems, 
-      metadataSource, 
-      hasTmdbOAuth, 
-      tmdbLanguage, 
-      tmdbBearerToken
-    );
-    const enrichEndTime = Date.now();
-    
+      
+      const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
+      const enrichedItems = await enrichItemsWithMetadata(
+        itemsResult.allItems, 
+        metadataSource, 
+        hasTmdbOAuth, 
+        tmdbLanguage, 
+        tmdbBearerToken
+      );
+      
+      // Update the items result with enriched items
+      const enrichedResult = {
+        ...itemsResult,
+        allItems: enrichedItems
+      };
+      
+      // Create metadata config for converter
+      const metadataConfig = {
+        metadataSource: metadataSource,
+        tmdbLanguage: tmdbLanguage
+      };
+      
+      const convertStartTime = Date.now();
+      metas = await convertToStremioFormat(enrichedResult, userConfig.rpdbApiKey, metadataConfig);
+      const convertEndTime = Date.now();
+    } else {
+      // Use original items without enrichment
+      const metadataConfig = {
+        metadataSource: 'cinemeta', // Use default for non-enriched items
+        tmdbLanguage: userConfig.tmdbLanguage || 'en-US'
+      };
+      
+      const convertStartTime = Date.now();
+      metas = await convertToStremioFormat(itemsResult, userConfig.rpdbApiKey, metadataConfig);
+      const convertEndTime = Date.now();
+    }
     
     // Log conversion results for debugging
-    const tmdbFormatItems = enrichedItems.filter(i => i.id && i.id.startsWith('tmdb:')).length;
+    const tmdbFormatItems = metas.filter(i => i.id && i.id.startsWith('tmdb:')).length;
     if (tmdbFormatItems > 0) {
 
     }
     
-    // Update the items result with enriched items
-    const enrichedResult = {
-      ...itemsResult,
-      allItems: enrichedItems
-    };
-
-    // Create metadata config for converter
-    const metadataConfig = {
-      metadataSource: userConfig.metadataSource || 'cinemeta',
-      tmdbLanguage: userConfig.tmdbLanguage || 'en-US'
-    };
-
-    const convertStartTime = Date.now();
-    
-    let metas = await convertToStremioFormat(enrichedResult, userConfig.rpdbApiKey, metadataConfig);
-    const convertEndTime = Date.now();
-    
-
     // Apply type filtering
     if (type === 'movie' || type === 'series') {
         const beforeFilter = metas.length;

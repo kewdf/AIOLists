@@ -2149,10 +2149,18 @@ function startNameEditing(listItemElement, list) {
     }
     elements.importedAddonsContainer.classList.remove('hidden');
     addonGroups.forEach(addon => {
-      const item = document.createElement('div'); item.className = 'addon-item-group';
+      const item = document.createElement('div'); 
+      item.className = 'addon-item-group';
       const logoSrc = addon.logo || '/assets/logo.ico';
       const urlObject = new URL(addon.apiBaseUrl);
       const configureUrl = `${urlObject.origin}/configure`;
+      
+      // Get current metadata settings for this addon
+      const addonOverrides = state.userConfig.addonMetadataOverrides || {};
+      const addonSettings = addonOverrides[addon.id] || {};
+      const isMetadataOverrideEnabled = addonSettings.enabled !== false; // Default to true if not explicitly disabled
+      const addonMetadataSource = addonSettings.metadataSource || state.userConfig.metadataSource || 'cinemeta';
+      
       item.innerHTML = `
         <img src="${logoSrc}" alt="${addon.name} logo" class="addon-group-logo">
         <div class="addon-group-details">
@@ -2168,8 +2176,45 @@ function startNameEditing(listItemElement, list) {
           </a>
           <button class="remove-addon-group action-icon" data-addon-id="${addon.id}" title="Remove Addon Group">❌</button>
         </div>
+        <div class="addon-metadata-settings">
+          <div class="metadata-override-toggle">
+            <label class="checkbox-label">
+              <input type="checkbox" class="metadata-override-checkbox" data-addon-id="${addon.id}" ${isMetadataOverrideEnabled ? 'checked' : ''}>
+              Override metadata
+            </label>
+          </div>
+          <div class="metadata-source-select" ${!isMetadataOverrideEnabled ? 'style="display: none;"' : ''}>
+            <select class="addon-metadata-source" data-addon-id="${addon.id}">
+              <option value="cinemeta" ${addonMetadataSource === 'cinemeta' ? 'selected' : ''}>Cinemeta</option>
+              <option value="tmdb" ${addonMetadataSource === 'tmdb' ? 'selected' : ''}>TMDB</option>
+            </select>
+          </div>
+        </div>
       `;
-      item.querySelector('.remove-addon-group').addEventListener('click', (e) => { e.stopPropagation(); removeImportedAddonGroup(addon.id);});
+      
+      // Add event listeners for metadata settings
+      const overrideCheckbox = item.querySelector('.metadata-override-checkbox');
+      const metadataSourceSelect = item.querySelector('.addon-metadata-source');
+      const metadataSourceDiv = item.querySelector('.metadata-source-select');
+      
+      overrideCheckbox.addEventListener('change', (e) => {
+        const enabled = e.target.checked;
+        updateAddonMetadataSettings(addon.id, enabled, null);
+        
+        // Show/hide metadata source select
+        metadataSourceDiv.style.display = enabled ? 'block' : 'none';
+      });
+      
+      metadataSourceSelect.addEventListener('change', (e) => {
+        const metadataSource = e.target.value;
+        updateAddonMetadataSettings(addon.id, null, metadataSource);
+      });
+      
+      item.querySelector('.remove-addon-group').addEventListener('click', (e) => { 
+        e.stopPropagation(); 
+        removeImportedAddonGroup(addon.id);
+      });
+      
       elements.addonsList.appendChild(item);
     });
   }
@@ -3280,6 +3325,51 @@ function startNameEditing(listItemElement, list) {
         tmdbOption.disabled = !hasTmdbBearerToken;
         tmdbOption.textContent = hasTmdbBearerToken ? 'TMDB' : 'TMDB (Bearer Token required)';
       }
+    }
+  }
+
+  async function updateAddonMetadataSettings(addonId, enabled, metadataSource) {
+    try {
+      const payload = { addonId };
+      if (enabled !== null) payload.enabled = enabled;
+      if (metadataSource !== null) payload.metadataSource = metadataSource;
+      
+      const response = await fetch(`/${state.configHash}/config/addon-metadata`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to update addon metadata settings');
+      }
+      
+      if (data.configHash && data.configHash !== state.configHash) {
+        state.configHash = data.configHash;
+        updateURL();
+        updateStremioButtonHref();
+      }
+      
+      // Update local state
+      if (!state.userConfig.addonMetadataOverrides) {
+        state.userConfig.addonMetadataOverrides = {};
+      }
+      if (!state.userConfig.addonMetadataOverrides[addonId]) {
+        state.userConfig.addonMetadataOverrides[addonId] = {};
+      }
+      
+      if (enabled !== null) {
+        state.userConfig.addonMetadataOverrides[addonId].enabled = enabled;
+      }
+      if (metadataSource !== null) {
+        state.userConfig.addonMetadataOverrides[addonId].metadataSource = metadataSource;
+      }
+      
+      showNotification('import', 'Addon metadata settings updated.', 'success');
+    } catch (error) {
+      console.error('Error updating addon metadata settings:', error);
+      showNotification('import', `Error: ${error.message}`, 'error', true);
     }
   }
 
