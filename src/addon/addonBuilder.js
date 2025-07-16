@@ -460,6 +460,13 @@ async function createAddon(userConfig) {
     if (isImportedSubCatalog) {
         const manifestCatalogType = customMediaTypeNames?.[currentListId] || listSourceInfo.type;
 
+        console.log(`[Debug] Processing imported sub-catalog: ${currentListId}`);
+        console.log(`[Debug] - Original name: ${originalName}`);
+        console.log(`[Debug] - Display name: ${displayName}`);
+        console.log(`[Debug] - Source type: ${listSourceInfo.type}`);
+        console.log(`[Debug] - Manifest catalog type: ${manifestCatalogType}`);
+        console.log(`[Debug] - Custom media type: ${customMediaTypeNames?.[currentListId]}`);
+
         if (!manifestCatalogType) {
           console.warn(`[AIOLists AddonBuilder] Manifest catalog type for imported sub-catalog ${currentListId} is undefined (source type: ${listSourceInfo.type}). Skipping.`);
           return;
@@ -469,6 +476,7 @@ async function createAddon(userConfig) {
           return;
         }
 
+        console.log(`[Debug] Adding catalog to manifest: ${currentListId} (${manifestCatalogType}) - ${displayName}`);
         tempGeneratedCatalogs.push({
             id: currentListId,
             type: manifestCatalogType,
@@ -830,7 +838,13 @@ async function createAddon(userConfig) {
 
   for (const addon of Object.values(importedAddons || {})) {
     const addonGroupId = String(addon.id);
+    console.log(`[Debug] Processing addon: ${addonGroupId} (${addon.name})`);
+    console.log(`[Debug] - isMDBListUrlImport: ${addon.isMDBListUrlImport}`);
+    console.log(`[Debug] - isTraktPublicList: ${addon.isTraktPublicList}`);
+    console.log(`[Debug] - catalogs count: ${addon.catalogs?.length || 0}`);
+    
     if (removedListsSet.has(addonGroupId) || hiddenListsSet.has(addonGroupId)) {
+        console.log(`[Debug] - Skipping (removed or hidden)`);
         continue;
     }
 
@@ -838,6 +852,7 @@ async function createAddon(userConfig) {
     const isTraktPublicList = !!addon.isTraktPublicList;
 
     if (isMDBListUrlImport || isTraktPublicList) {
+      console.log(`[Debug] - Processing as URL import`);
       let listDataForUrlImport = {
           id: addonGroupId, // The AIOLists unique ID for this imported URL list
           name: addon.name,
@@ -848,10 +863,13 @@ async function createAddon(userConfig) {
       await processListForManifest(listDataForUrlImport, addonGroupId, false, null);
 
     } else if (addon.catalogs && addon.catalogs.length > 0) { 
+      console.log(`[Debug] - Processing as external addon with ${addon.catalogs.length} catalogs`);
       for (const catalog_from_imported_addon of addon.catalogs) {
         const catalogIdForManifest = String(catalog_from_imported_addon.id); 
+        console.log(`[Debug] - Processing catalog: ${catalogIdForManifest} (${catalog_from_imported_addon.name})`);
         
         if (removedListsSet.has(catalogIdForManifest) || hiddenListsSet.has(catalogIdForManifest)) {
+            console.log(`[Debug] - Skipping catalog (removed or hidden)`);
             continue;
         }
 
@@ -864,6 +882,8 @@ async function createAddon(userConfig) {
         };
         await processListForManifest(subCatalogData, catalogIdForManifest, true, addon);
       }
+    } else {
+      console.log(`[Debug] - Addon has no catalogs or is not a URL import`);
     }
   }
   
