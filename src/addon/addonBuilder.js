@@ -1022,6 +1022,11 @@ async function createAddon(userConfig) {
   }
   
   manifest.catalogs = tempGeneratedCatalogs;
+  console.log(`[Debug] Final manifest catalogs (${tempGeneratedCatalogs.length} total):`);
+  tempGeneratedCatalogs.forEach((catalog, index) => {
+    console.log(`[Debug] ${index + 1}. ${catalog.id} (${catalog.type}) - ${catalog.name}`);
+  });
+  
   const builder = new addonBuilder(manifest);
 
   builder.defineCatalogHandler(async ({ type, id, extra }) => {

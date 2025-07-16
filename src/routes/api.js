@@ -2485,5 +2485,25 @@ module.exports = function(router) {
     res.json(defaultManifest);
   });
 
+  router.post('/:configHash/force-refresh-manifest', async (req, res) => {
+    try {
+      // Clear all manifest cache
+      manifestCache.clear();
+      console.log('[Debug] Manifest cache cleared');
+      
+      // Force regenerate manifest
+      const addonInterface = await createAddon(req.userConfig);
+      
+      res.json({ 
+        success: true, 
+        message: 'Manifest cache cleared and regenerated',
+        catalogCount: addonInterface.manifest.catalogs.length
+      });
+    } catch (error) {
+      console.error('[Debug] Error forcing manifest refresh:', error);
+      res.status(500).json({ error: 'Failed to force refresh manifest', details: error.message });
+    }
+  });
+
   return router;
 };
