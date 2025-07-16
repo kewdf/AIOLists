@@ -2142,8 +2142,17 @@ function startNameEditing(listItemElement, list) {
 
   function renderImportedAddons() {
     elements.addonsList.innerHTML = '';
+    console.log('[Debug] All imported addons:', state.userConfig.importedAddons);
+    
     const addonGroups = Object.values(state.userConfig.importedAddons || {})
-                              .filter(addon => addon && !(addon.isMDBListUrlImport || addon.isTraktPublicList));
+                              .filter(addon => {
+                                const isUrlImport = addon && (addon.isMDBListUrlImport || addon.isTraktPublicList);
+                                console.log(`[Debug] Addon ${addon?.id || 'unknown'}: isUrlImport=${isUrlImport}, isMDBListUrlImport=${addon?.isMDBListUrlImport}, isTraktPublicList=${addon?.isTraktPublicList}`);
+                                return addon && !isUrlImport;
+                              });
+    
+    console.log('[Debug] Filtered addon groups:', addonGroups);
+    
     if (addonGroups.length === 0) {
       elements.importedAddonsContainer.classList.add('hidden'); return;
     }
