@@ -20,8 +20,56 @@ const imdbToTmdbCache = new Cache({ defaultTTL: 7 * 24 * 3600 * 1000 }); // 7 da
 const TMDB_BASE_URL_V3 = 'https://api.themoviedb.org/3';
 const TMDB_REQUEST_TIMEOUT = 15000;
 
+// Rate limiting for TMDB API
+let lastRequestTime = 0;
+const MIN_REQUEST_INTERVAL = 250; // Minimum 250ms between requests to avoid rate limits
+
 // TMDB Bearer Token - Read Access Token from environment variable (for server-side operations)
 const DEFAULT_TMDB_BEARER_TOKEN = TMDB_BEARER_TOKEN;
+
+/**
+ * Rate-limited TMDB request function
+ * @param {string} url - TMDB API URL
+ * @param {Object} options - Request options
+ * @returns {Promise<Object>} Response data
+ */
+async function makeTmdbRequest(url, options = {}) {
+  // Ensure minimum interval between requests
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastRequestTime;
+  if (timeSinceLastRequest < MIN_REQUEST_INTERVAL) {
+    await new Promise(resolve => setTimeout(resolve, MIN_REQUEST_INTERVAL - timeSinceLastRequest));
+  }
+  
+  lastRequestTime = Date.now();
+  
+  try {
+    const response = await axios(url, {
+      timeout: TMDB_REQUEST_TIMEOUT,
+      ...options
+    });
+    return response;
+  } catch (error) {
+    if (error.response?.status === 429) {
+      // Rate limited - wait and retry once
+      console.warn(`[TMDB] Rate limited, waiting 2 seconds before retry...`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      lastRequestTime = Date.now();
+      
+      try {
+        const retryResponse = await axios(url, {
+          timeout: TMDB_REQUEST_TIMEOUT,
+          ...options
+        });
+        return retryResponse;
+      } catch (retryError) {
+        console.warn(`[TMDB] Retry failed for ${url}:`, retryError.message);
+        throw retryError;
+      }
+    }
+    throw error;
+  }
+}
 
 /**
  * Create TMDB request token (Step 1)
@@ -587,23 +635,25 @@ async function batchConvertImdbToTmdbIds(imdbIds, userBearerToken = DEFAULT_TMDB
   const CONCURRENCY_LIMIT = TMDB_CONCURRENT_REQUESTS || 15; // Use config value for consistency, optimized for conversion
   
   const processChunk = async (chunk) => {
-    const chunkPromises = chunk.map(async (imdbId) => {
+    const results = [];
+    for (const imdbId of chunk) {
       try {
         const result = await convertImdbToTmdbId(imdbId, userBearerToken);
-        return { imdbId, result };
+        if (result) {
+          results.push({ imdbId, ...result });
+        }
       } catch (error) {
-        console.error(`Error converting IMDB ID ${imdbId}:`, error.message);
-        return { imdbId, result: null };
+        console.warn(`[TMDB] Failed to convert IMDB ID ${imdbId}:`, error.message);
       }
-    });
-    
-    return Promise.all(chunkPromises);
+    }
+    return results;
   };
   
-  // Split into chunks and process them
+  // Process in smaller batches to avoid rate limits
+  const batchSize = 5; // Reduced to avoid rate limits
   const chunks = [];
-  for (let i = 0; i < uncachedIds.length; i += CONCURRENCY_LIMIT) {
-    chunks.push(uncachedIds.slice(i, i + CONCURRENCY_LIMIT));
+  for (let i = 0; i < uncachedIds.length; i += batchSize) {
+    chunks.push(uncachedIds.slice(i, i + batchSize));
   }
   
   for (const chunk of chunks) {
@@ -642,18 +692,17 @@ async function fetchTmdbMetadata(tmdbId, type, language = 'en-US', userBearerTok
   
   try {
     const endpoint = type === 'movie' ? 'movie' : 'tv';
-    const response = await axios.get(`${TMDB_BASE_URL_V3}/${endpoint}/${tmdbId}`, {
-      params: {
+    const response = await makeTmdbRequest(`${TMDB_BASE_URL_V3}/${endpoint}/${tmdbId}`, {
+      params: { 
         language: language,
-        append_to_response: 'credits,videos,external_ids,images'
+        append_to_response: 'credits,videos,images,external_ids'
       },
       headers: {
         'accept': 'application/json',
         'Authorization': `Bearer ${userBearerToken || DEFAULT_TMDB_BEARER_TOKEN}`
-      },
-      timeout: TMDB_REQUEST_TIMEOUT
+      }
     });
-    
+
     const data = response.data;
     
     // For series, also fetch season and episode data
@@ -670,18 +719,26 @@ async function fetchTmdbMetadata(tmdbId, type, language = 'en-US', userBearerTok
           genre.name.toLowerCase() === 'animation' || genre.name.toLowerCase() === 'anime'
         );
         
+        // Limit concurrent season requests to avoid rate limits
+        const maxConcurrentSeasons = 3;
+        const seasonsToFetch = [];
+        
         for (let seasonNum = 0; seasonNum <= maxSeasons; seasonNum++) {
           // Skip season 0 for anime series or if there are too many seasons
           if (seasonNum === 0 && (isAnime || data.number_of_seasons > 5)) continue;
-          
-          seasonPromises.push(
-            axios.get(`${TMDB_BASE_URL_V3}/tv/${tmdbId}/season/${seasonNum}`, {
+          seasonsToFetch.push(seasonNum);
+        }
+        
+        // Process seasons in smaller batches to avoid rate limits
+        for (let i = 0; i < seasonsToFetch.length; i += maxConcurrentSeasons) {
+          const batch = seasonsToFetch.slice(i, i + maxConcurrentSeasons);
+          const batchPromises = batch.map(seasonNum => 
+            makeTmdbRequest(`${TMDB_BASE_URL_V3}/tv/${tmdbId}/season/${seasonNum}`, {
               params: { language: language },
               headers: {
                 'accept': 'application/json',
                 'Authorization': `Bearer ${userBearerToken || DEFAULT_TMDB_BEARER_TOKEN}`
-              },
-              timeout: TMDB_REQUEST_TIMEOUT
+              }
             }).catch(error => {
               // Don't log 404 errors for season 0 as they're expected for many series
               if (error.response?.status === 404 && seasonNum === 0) {
@@ -691,6 +748,9 @@ async function fetchTmdbMetadata(tmdbId, type, language = 'en-US', userBearerTok
               return null;
             })
           );
+          
+          const batchResults = await Promise.all(batchPromises);
+          seasonPromises.push(...batchResults);
         }
         
         const seasonResponses = await Promise.all(seasonPromises);
@@ -1063,39 +1123,32 @@ async function batchFetchTmdbMetadata(items, language = 'en-US', userBearerToken
   const results = {};
   
   const processChunk = async (chunk) => {
-    const chunkPromises = chunk.map(async (item) => {
-      const identifier = item.imdbId || `tmdb:${item.tmdbId}`;
+    const results = [];
+    for (const item of chunk) {
       try {
         const metadata = await fetchTmdbMetadata(item.tmdbId, item.type, language, userBearerToken);
         if (metadata) {
-          // Ensure the ID is set to the IMDB ID if we have it
-          if (item.imdbId) {
-            metadata.id = item.imdbId;
-            metadata.imdb_id = item.imdbId;
-          }
-          return { identifier, metadata };
+          results.push(metadata);
         }
-        return { identifier, metadata: null };
       } catch (error) {
-        console.error(`Error fetching TMDB metadata for item ${identifier}:`, error.message);
-        return { identifier, metadata: null };
+        console.warn(`[TMDB] Failed to fetch metadata for ${item.type} ${item.tmdbId}:`, error.message);
       }
-    });
-    
-    return Promise.all(chunkPromises);
+    }
+    return results;
   };
   
-  // Split into chunks and process them
+  // Process in smaller batches to avoid rate limits
+  const batchSize = 3; // Reduced to avoid rate limits
   const chunks = [];
-  for (let i = 0; i < items.length; i += CONCURRENCY_LIMIT) {
-    chunks.push(items.slice(i, i + CONCURRENCY_LIMIT));
+  for (let i = 0; i < items.length; i += batchSize) {
+    chunks.push(items.slice(i, i + batchSize));
   }
   
   for (const chunk of chunks) {
     const chunkResults = await processChunk(chunk);
-    chunkResults.forEach(({ identifier, metadata }) => {
+    chunkResults.forEach((metadata) => {
       if (metadata) {
-        results[identifier] = metadata;
+        results[metadata.id] = metadata;
       }
     });
     
