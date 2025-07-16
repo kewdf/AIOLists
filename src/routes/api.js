@@ -2505,5 +2505,30 @@ module.exports = function(router) {
     }
   });
 
+  router.get('/:configHash/debug-manifest', async (req, res) => {
+    try {
+      const cacheKey = `manifest_${req.configHash}`;
+      let addonInterface = manifestCache.get(cacheKey);
+      
+      if (!addonInterface) {
+        addonInterface = await createAddon(req.userConfig);
+        manifestCache.set(cacheKey, addonInterface);
+      }
+      
+      res.json({ 
+        success: true, 
+        catalogCount: addonInterface.manifest.catalogs.length,
+        catalogs: addonInterface.manifest.catalogs.map(cat => ({
+          id: cat.id,
+          name: cat.name,
+          type: cat.type
+        }))
+      });
+    } catch (error) {
+      console.error('[Debug] Error getting manifest debug info:', error);
+      res.status(500).json({ error: 'Failed to get manifest debug info', details: error.message });
+    }
+  });
+
   return router;
 };

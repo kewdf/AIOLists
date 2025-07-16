@@ -665,9 +665,14 @@ async function fetchTmdbMetadata(tmdbId, type, language = 'en-US', userBearerTok
         const maxSeasons = data.number_of_seasons;
         const seasonPromises = [];
         
+        // Check if this is likely an anime series (has animation genre)
+        const isAnime = data.genres && data.genres.some(genre => 
+          genre.name.toLowerCase() === 'animation' || genre.name.toLowerCase() === 'anime'
+        );
+        
         for (let seasonNum = 0; seasonNum <= maxSeasons; seasonNum++) {
-          // Skip season 0 if it has no episodes or if there are too many seasons
-          if (seasonNum === 0 && data.number_of_seasons > 5) continue;
+          // Skip season 0 for anime series or if there are too many seasons
+          if (seasonNum === 0 && (isAnime || data.number_of_seasons > 5)) continue;
           
           seasonPromises.push(
             axios.get(`${TMDB_BASE_URL_V3}/tv/${tmdbId}/season/${seasonNum}`, {
@@ -678,6 +683,10 @@ async function fetchTmdbMetadata(tmdbId, type, language = 'en-US', userBearerTok
               },
               timeout: TMDB_REQUEST_TIMEOUT
             }).catch(error => {
+              // Don't log 404 errors for season 0 as they're expected for many series
+              if (error.response?.status === 404 && seasonNum === 0) {
+                return null; // Silently skip season 0 if it doesn't exist
+              }
               console.warn(`[TMDB] Failed to fetch season ${seasonNum} for series ${tmdbId}:`, error.message);
               return null;
             })
