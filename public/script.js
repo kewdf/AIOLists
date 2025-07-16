@@ -1153,6 +1153,7 @@ document.addEventListener('DOMContentLoaded', function() {
       updateGenreFilterButtonText();
       updateRandomListButtonState();
       updateSearchSourcesUI();
+      updateAnimeSearchUI(); // Update anime search UI
 
       if (mdblistApiKey || rpdbApiKey) {
         await validateAndSaveApiKeys(mdblistApiKey, rpdbApiKey, '', true);
@@ -2942,6 +2943,7 @@ function startNameEditing(listItemElement, list) {
         state.userConfig.animeSearchEnabled = animeSearchEnabled; // Update local state
         updateURL();
         updateStremioButtonHref();
+        updateAnimeSearchUI(); // Update anime search UI
         showNotification('search', 'Search preferences saved.', 'success');
       }
     } catch (error) {
@@ -3110,6 +3112,7 @@ function startNameEditing(listItemElement, list) {
       updateGenreFilterButtonText();
       updateRandomListButtonState();
       updateSearchSourcesUI();
+      updateAnimeSearchUI(); // Update anime search UI
 
       // Update persistence status
       const hasUpstashCredentials = !!(state.userConfig.upstashUrl && state.userConfig.upstashToken);
@@ -3383,6 +3386,54 @@ function startNameEditing(listItemElement, list) {
   }
 
   init();
+
+  // Anime search source selection
+  const animeSearchSourceSelect = document.getElementById('animeSearchSourceSelect');
+  if (animeSearchSourceSelect) {
+    animeSearchSourceSelect.addEventListener('change', async (e) => {
+      const animeSearchSource = e.target.value;
+      try {
+        const response = await fetch(`/${state.configHash}/config/anime-search-source`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ animeSearchSource })
+        });
+        
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || 'Failed to update anime search source');
+        }
+        
+        if (data.configHash && data.configHash !== state.configHash) {
+          state.configHash = data.configHash;
+          updateURL();
+          updateStremioButtonHref();
+        }
+        
+        showNotification('search', `Anime search source updated to ${animeSearchSource}`, 'success');
+      } catch (error) {
+        console.error('Anime Search Source Error:', error);
+        showNotification('search', `Error: ${error.message}`, 'error');
+      }
+    });
+  }
+
+  // Update anime search UI
+  function updateAnimeSearchUI() {
+    const animeSearchEnabled = document.getElementById('animeSearchEnabled');
+    const animeSearchSourceGroup = document.getElementById('animeSearchSourceGroup');
+    const animeSearchSourceSelect = document.getElementById('animeSearchSourceSelect');
+    
+    if (animeSearchEnabled && animeSearchSourceGroup && animeSearchSourceSelect) {
+      // Show/hide anime search source option based on anime search being enabled
+      animeSearchSourceGroup.style.display = animeSearchEnabled.checked ? 'block' : 'none';
+      
+      // Set the current value
+      if (state.userConfig.animeSearchSource) {
+        animeSearchSourceSelect.value = state.userConfig.animeSearchSource;
+      }
+    }
+  }
 });
 
 // Event handlers

@@ -55,6 +55,7 @@ const defaultConfig = {
   searchSources: ['cinemeta'], // Traditional movie/series search sources
   mergedSearchSources: ['tmdb'], // New merged search sources - enabled by default with TMDB
   animeSearchEnabled: true,
+  animeSearchSource: 'kitsu', // 'kitsu' or 'cinemeta' - Kitsu is preferred for anime
   // Per-addon metadata override settings
   addonMetadataOverrides: {}, // Format: { addonId: { enabled: boolean, metadataSource: string } }
   availableSortOptions: [

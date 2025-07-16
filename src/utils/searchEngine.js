@@ -25,6 +25,7 @@ async function searchContent({ query, type = 'all', sources = ['cinemeta'], limi
 
   // Handle anime search specifically
   if (type === 'anime' || sources.includes('anime')) {
+    console.log(`[Search] Using Kitsu for anime search: "${query}"`);
     return await searchAnime(query, limit, userConfig);
   }
 
@@ -1068,7 +1069,7 @@ async function searchTMDBMultiMerged(query, limit, userConfig) {
 }
 
 /**
- * Anime search using Kitsu API
+ * Anime search using Kitsu API with fallback to Cinemeta
  * @param {string} query - Search query
  * @param {number} limit - Maximum results
  * @param {Object} userConfig - User configuration
@@ -1079,8 +1080,20 @@ async function searchAnime(query, limit, userConfig) {
     return { results: [], totalResults: 0, sources: ['anime'] };
   }
 
+  const animeSearchSource = userConfig.animeSearchSource || 'kitsu';
+  
+  // If user prefers Cinemeta for anime, use it directly
+  if (animeSearchSource === 'cinemeta') {
+    console.log(`[Anime Search] Using Cinemeta for anime search: "${query}"`);
+    return await searchCinemeta(query, 'series', limit);
+  }
+
+  // Default to Kitsu with Cinemeta fallback
+  console.log(`[Anime Search] Using Kitsu for anime search: "${query}"`);
+  
   try {    
-    const response = await axios.get(`https://anime-kitsu.strem.fun/catalog/anime/kitsu-anime-list/search=${encodeURIComponent(query)}.json`, {
+    // Try Kitsu first
+    const kitsuResponse = await axios.get(`https://anime-kitsu.strem.fun/catalog/anime/kitsu-anime-list/search=${encodeURIComponent(query)}.json`, {
       timeout: 15000,
       headers: {
         'Accept': 'application/json',
@@ -1088,95 +1101,105 @@ async function searchAnime(query, limit, userConfig) {
       }
     });
 
-    if (!response.data || !Array.isArray(response.data.metas)) {
-      console.error('[Anime Search] Invalid response from Kitsu API');
-      return { results: [], totalResults: 0, sources: ['anime'] };
-    }
+    if (kitsuResponse.data && Array.isArray(kitsuResponse.data.metas) && kitsuResponse.data.metas.length > 0) {
+      // Kitsu found results - use them
+      const results = [];
+      
+      // Process each result and convert to our standard format
+      for (const item of kitsuResponse.data.metas.slice(0, limit)) {
+        try {
+          // Convert Kitsu format to our internal format
+          const resultItem = {
+            id: item.imdb_id || item.id, // Prefer IMDB ID if available
+            imdb_id: item.imdb_id,
+            kitsu_id: item.kitsu_id,
+            type: item.type,
+            animeType: item.animeType,
+            name: item.name,
+            aliases: item.aliases,
+            poster: item.poster,
+            background: item.background,
+            description: item.description,
+            releaseInfo: item.releaseInfo,
+            runtime: item.runtime,
+            imdbRating: item.imdbRating,
+            genres: item.genres,
+            logo: item.logo,
+            trailers: item.trailers,
+            links: item.links,
+            searchSource: 'anime',
+            foundVia: 'anime-search'
+          };
 
-    const results = [];
-    
-    // Process each result and convert to our standard format
-    for (const item of response.data.metas.slice(0, limit)) {
-      try {
-        // Convert Kitsu format to our internal format
-        const resultItem = {
-          id: item.imdb_id || item.id, // Prefer IMDB ID if available
-          imdb_id: item.imdb_id,
-          kitsu_id: item.kitsu_id,
-          type: item.type,
-          animeType: item.animeType,
-          name: item.name,
-          aliases: item.aliases,
-          poster: item.poster,
-          background: item.background,
-          description: item.description,
-          releaseInfo: item.releaseInfo,
-          runtime: item.runtime,
-          imdbRating: item.imdbRating,
-          genres: item.genres,
-          logo: item.logo,
-          trailers: item.trailers,
-          links: item.links,
-          searchSource: 'anime',
-          foundVia: 'anime-search'
-        };
+          // Only enrich with Cinemeta if we have IMDB ID and Kitsu data is incomplete
+          if (item.imdb_id && item.imdb_id.startsWith('tt') && (!item.poster || !item.description)) {
+            try {
+              // Use metadata enrichment to get additional details
+              const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
+              const enrichedItems = await enrichItemsWithMetadata(
+                [{ ...resultItem, id: item.imdb_id }], 
+                'cinemeta', // Use Cinemeta for anime enrichment
+                false, // No TMDB OAuth needed for basic enrichment
+                userConfig.tmdbLanguage || 'en-US',
+                userConfig.tmdbBearerToken
+              );
 
-        // Enrich with additional metadata if we have IMDB ID
-        if (item.imdb_id && item.imdb_id.startsWith('tt')) {
-          try {
-            // Use metadata enrichment to get additional details
-            const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
-            const enrichedItems = await enrichItemsWithMetadata(
-              [{ ...resultItem, id: item.imdb_id }], 
-              userConfig.metadataSource || 'cinemeta',
-              false, // No TMDB OAuth needed for basic enrichment
-              userConfig.tmdbLanguage || 'en-US',
-              userConfig.tmdbBearerToken
-            );
-
-            if (enrichedItems && enrichedItems.length > 0) {
-              const enriched = enrichedItems[0];
-              // Merge enriched data while preserving anime-specific fields
-              Object.assign(resultItem, {
-                ...enriched,
-                // Preserve anime-specific fields
-                kitsu_id: item.kitsu_id,
-                animeType: item.animeType,
-                aliases: item.aliases,
-                searchSource: 'anime',
-                foundVia: 'anime-search',
-                // Prefer anime poster if available, otherwise use enriched
-                poster: item.poster || enriched.poster,
-                // Prefer anime description if available
-                description: item.description || enriched.description
-              });
+              if (enrichedItems && enrichedItems.length > 0) {
+                const enriched = enrichedItems[0];
+                // Merge enriched data while preserving anime-specific fields
+                Object.assign(resultItem, {
+                  ...enriched,
+                  // Preserve anime-specific fields
+                  kitsu_id: item.kitsu_id,
+                  animeType: item.animeType,
+                  aliases: item.aliases,
+                  searchSource: 'anime',
+                  foundVia: 'anime-search',
+                  // Prefer anime poster if available, otherwise use enriched
+                  poster: item.poster || enriched.poster,
+                  // Prefer anime description if available
+                  description: item.description || enriched.description
+                });
+              }
+            } catch (error) {
+              console.warn(`[Anime Search] Failed to enrich anime item ${item.imdb_id}:`, error.message);
             }
-          } catch (error) {
-            console.warn(`[Anime Search] Failed to enrich anime item ${item.imdb_id}:`, error.message);
           }
+
+          results.push(resultItem);
+        } catch (error) {
+          console.warn(`[Anime Search] Failed to process anime item:`, error.message);
         }
-
-        results.push(resultItem);
-      } catch (error) {
-        console.warn(`[Anime Search] Failed to process anime item:`, error.message);
       }
-    }
 
-    // Apply RPDB posters if configured
-    let finalResults = results;
-    if (userConfig.rpdbApiKey) {
-      finalResults = await applyRpdbPostersToSearchResults(results, userConfig);
-    }
+      // Apply RPDB posters if configured
+      let finalResults = results;
+      if (userConfig.rpdbApiKey) {
+        finalResults = await applyRpdbPostersToSearchResults(results, userConfig);
+      }
 
-    return {
-      results: finalResults,
-      totalResults: finalResults.length,
-      sources: ['anime']
-    };
+      return {
+        results: finalResults,
+        totalResults: finalResults.length,
+        sources: ['anime']
+      };
+    } else {
+      // Kitsu found no results - fall back to Cinemeta
+      console.log(`[Anime Search] No results from Kitsu for "${query}", falling back to Cinemeta`);
+      return await searchCinemeta(query, 'series', limit);
+    }
 
   } catch (error) {
     console.error('[Anime Search] Error in anime search:', error.message);
-    return { results: [], totalResults: 0, sources: ['anime'] };
+    console.log(`[Anime Search] Kitsu failed for "${query}", falling back to Cinemeta`);
+    
+    // Fall back to Cinemeta if Kitsu fails
+    try {
+      return await searchCinemeta(query, 'series', limit);
+    } catch (cinemetaError) {
+      console.error('[Anime Search] Cinemeta fallback also failed:', cinemetaError.message);
+      return { results: [], totalResults: 0, sources: ['anime'] };
+    }
   }
 }
 

@@ -2530,5 +2530,59 @@ module.exports = function(router) {
     }
   });
 
+  router.get('/debug-manifest-simple', async (req, res) => {
+    try {
+      // Get the configHash from the URL or use a default
+      const configHash = req.query.configHash || 'test';
+      const cacheKey = `manifest_${configHash}`;
+      let addonInterface = manifestCache.get(cacheKey);
+      
+      if (!addonInterface) {
+        // Create a test addon interface
+        const { createAddon } = require('../addon/addonBuilder');
+        const testConfig = {
+          importedAddons: {},
+          searchSources: ['cinemeta'],
+          mergedSearchSources: ['tmdb'],
+          animeSearchEnabled: true
+        };
+        addonInterface = await createAddon(testConfig);
+      }
+      
+      res.json({ 
+        success: true, 
+        catalogCount: addonInterface.manifest.catalogs.length,
+        catalogs: addonInterface.manifest.catalogs.map(cat => ({
+          id: cat.id,
+          name: cat.name,
+          type: cat.type
+        }))
+      });
+    } catch (error) {
+      console.error('[Debug] Error getting manifest debug info:', error);
+      res.status(500).json({ error: 'Failed to get manifest debug info', details: error.message });
+    }
+  });
+
+  router.post('/:configHash/config/anime-search-source', async (req, res) => {
+    try {
+      const { animeSearchSource } = req.body;
+      
+      if (!animeSearchSource || !['kitsu', 'cinemeta'].includes(animeSearchSource)) {
+        return res.status(400).json({ success: false, error: 'Invalid anime search source. Must be "kitsu" or "cinemeta".' });
+      }
+
+      req.userConfig.animeSearchSource = animeSearchSource;
+      req.userConfig.lastUpdated = new Date().toISOString();
+
+      const newConfigHash = await compressConfig(req.userConfig);
+      manifestCache.clear();
+      res.json({ success: true, configHash: newConfigHash });
+    } catch (error) {
+      console.error('Error updating anime search source:', error);
+      res.status(500).json({ success: false, error: 'Failed to update anime search source' });
+    }
+  });
+
   return router;
 };
